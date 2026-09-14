@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="FlatTracker.Core/FlatTracker.Core.csproj" />
+  <Project Path="FlatTracker.Infrastructure/FlatTracker.Infrastructure.csproj" />
+  <Project Path="FlatTracker.UI/FlatTracker.UI.csproj" />
+</Solution>
