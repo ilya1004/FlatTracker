@@ -66,7 +66,21 @@ public sealed class UiLoggerProvider : ILoggerProvider
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            if (logLevel < LogLevel.Information)
+            {
+                return false;
+            }
+
+            if (logLevel <= LogLevel.Information
+                && _categoryName.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            return true;
+        }
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)

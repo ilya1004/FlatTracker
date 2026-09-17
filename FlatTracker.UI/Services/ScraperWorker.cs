@@ -18,6 +18,7 @@ public sealed class ScraperWorker(
     INotificationPreferencesService notificationPreferences,
     IOptions<ScraperOptions> options,
     ScrapeTrigger trigger,
+    ScrapeRunTracker runTracker,
     ILogger<ScraperWorker> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -56,6 +57,13 @@ public sealed class ScraperWorker(
 
         while (!ct.IsCancellationRequested)
         {
+            if (!runTracker.TryBeginRun())
+            {
+                logger.LogWarning("Прогон проверки уже выполняется, текущий пропущен");
+                await WaitUntilNextRunAsync(ct);
+                continue;
+            }
+
             try
             {
                 await _retryPipeline.ExecuteAsync(async token =>
@@ -94,6 +102,10 @@ public sealed class ScraperWorker(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Scrape run failed after all retries");
+            }
+            finally
+            {
+                runTracker.EndRun();
             }
 
             await WaitUntilNextRunAsync(ct);

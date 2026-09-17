@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:FlatTracker.UI"
         mc:Ignorable="d"
-        Title="FlatTracker" Height="540" Width="1000">
+        Title="FlatTracker" Icon="Assets/house_icon.ico" Height="540" Width="1000">
     <Grid Margin="12">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="340" />
@@ -17,6 +17,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
@@ -42,9 +43,12 @@
             </ListBox>
 
             <TextBlock Grid.Row="3" x:Name="StatusText" Margin="0,8,0,0" TextWrapping="Wrap" />
+
+            <Button Grid.Row="4" Content="Проверить сейчас" Padding="8,6" Margin="0,12,0,0"
+                    Click="RunCheck_Click" />
         </Grid>
 
-        <Grid Grid.Column="1">
+        <Grid Grid.Row="0" Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />

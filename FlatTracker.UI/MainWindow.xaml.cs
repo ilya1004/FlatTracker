@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using FlatTracker.Core.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace FlatTracker.UI;
 
@@ -12,17 +13,26 @@ public partial class MainWindow : Window
     private readonly INotificationPreferencesService _preferences;
     private readonly IStorageService _storage;
     private readonly UiLogSink _logSink;
+    private readonly ScrapeTrigger _trigger;
+    private readonly ScrapeRunTracker _runTracker;
+    private readonly ILogger<MainWindow> _logger;
     private readonly ObservableCollection<DistrictItem> _districts = new();
 
     public MainWindow(
         INotificationPreferencesService preferences,
         IStorageService storage,
-        UiLogSink logSink)
+        UiLogSink logSink,
+        ScrapeTrigger trigger,
+        ScrapeRunTracker runTracker,
+        ILogger<MainWindow> logger)
     {
         InitializeComponent();
         _preferences = preferences;
         _storage = storage;
         _logSink = logSink;
+        _trigger = trigger;
+        _runTracker = runTracker;
+        _logger = logger;
 
         DistrictsList.ItemsSource = _districts;
 
@@ -49,6 +59,18 @@ public partial class MainWindow : Window
     private void ClearLog_Click(object sender, RoutedEventArgs e)
     {
         LogBox.Clear();
+    }
+
+    private void RunCheck_Click(object sender, RoutedEventArgs e)
+    {
+        if (_runTracker.IsRunning)
+        {
+            _logger.LogInformation("Проверка уже выполняется, ручной запуск пропущен");
+            return;
+        }
+
+        _logger.LogInformation("Проверка запущена вручную из интерфейса");
+        _trigger.Signal();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

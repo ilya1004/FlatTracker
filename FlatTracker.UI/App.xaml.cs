@@ -69,6 +69,7 @@ public partial class App : Application
 
                 services.AddSingleton<UserAgentPool>();
                 services.AddSingleton<ScrapeTrigger>();
+                services.AddSingleton<ScrapeRunTracker>();
                 services.AddSingleton<IScraperService, ScraperService>();
                 services.AddSingleton<IStorageService, SqliteStorageService>();
                 services.AddSingleton<INotificationService, TelegramNotificationService>();
