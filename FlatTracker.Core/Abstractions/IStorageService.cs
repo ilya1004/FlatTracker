@@ -8,5 +8,6 @@ public interface IStorageService
     Task EnsureInitializedAsync(CancellationToken ct);
     Task<SaveAdsResult> SaveAdsAsync(IReadOnlyList<AdRecord> ads, CancellationToken ct);
     Task<IReadOnlyList<AdRecord>> GetAdsAsync(string? search, CancellationToken ct);
+    Task<IReadOnlyList<string>> GetDistrictsAsync(CancellationToken ct);
     Task<int> GetCountAsync(CancellationToken ct);
 }

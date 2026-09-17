@@ -15,6 +15,7 @@ public sealed class ScraperWorker(
     IScraperService scraperService,
     IStorageService storageService,
     INotificationService notificationService,
+    INotificationPreferencesService notificationPreferences,
     IOptions<ScraperOptions> options,
     ScrapeTrigger trigger,
     ILogger<ScraperWorker> logger) : BackgroundService
@@ -78,7 +79,7 @@ public sealed class ScraperWorker(
                     }
 
                     var result = await storageService.SaveAdsAsync(records, token);
-                    await SendReportAsync(result, token);
+                    await SendReportAsync(FilterBySelectedDistricts(result), token);
 
                     logger.LogInformation("=== Scrape complete: {Count} ads across {Pages} pages ===", records.Count, rawBodies.Count);
 
@@ -99,6 +100,26 @@ public sealed class ScraperWorker(
         }
 
         logger.LogInformation("Scraper worker shutting down");
+    }
+
+    private SaveAdsResult FilterBySelectedDistricts(SaveAdsResult result)
+    {
+        var selected = notificationPreferences.SelectedDistricts;
+        if (selected.Count == 0)
+            return result;
+
+        var set = new HashSet<string>(selected, StringComparer.OrdinalIgnoreCase);
+
+        static string? DistrictOf(AdRecord ad) => ad.District ?? ad.Region;
+
+        var newAds = result.NewAds
+            .Where(ad => set.Contains(DistrictOf(ad) ?? string.Empty))
+            .ToList();
+        var updatedAds = result.UpdatedAds
+            .Where(u => set.Contains(DistrictOf(u.Ad) ?? string.Empty))
+            .ToList();
+
+        return new SaveAdsResult { NewAds = newAds, UpdatedAds = updatedAds };
     }
 
     private async Task SendReportAsync(SaveAdsResult result, CancellationToken ct)

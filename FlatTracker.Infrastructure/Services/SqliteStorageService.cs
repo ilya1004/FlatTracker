@@ -135,4 +135,21 @@ public sealed class SqliteStorageService(
         await using var db = await contextFactory.CreateDbContextAsync(ct);
         return await db.Ads.CountAsync(ct);
     }
+
+    public async Task<IReadOnlyList<string>> GetDistrictsAsync(CancellationToken ct)
+    {
+        await using var db = await contextFactory.CreateDbContextAsync(ct);
+
+        var values = await db.Ads
+            .Select(a => a.District ?? a.Region)
+            .Where(d => d != null)
+            .ToListAsync(ct);
+
+        return values
+            .Where(d => !string.IsNullOrWhiteSpace(d))
+            .Select(d => d!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(d => d, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 }
