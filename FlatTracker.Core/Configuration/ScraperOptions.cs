@@ -16,6 +16,6 @@ public sealed class ScraperOptions
     public int TimeoutSeconds { get; set; }
     public int MinIntervalMinutes { get; set; }
     public int MaxIntervalMinutes { get; set; }
-    public string Proxy { get; set; }
-    public string OutputDirectory { get; set; }
+    public string Proxy { get; set; } = string.Empty;
+    public string OutputDirectory { get; set; } = "./output";
 }

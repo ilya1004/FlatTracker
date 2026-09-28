@@ -4,14 +4,16 @@ using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using FlatTracker.Core.Abstractions;
+using FlatTracker.Core.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace FlatTracker.UI;
 
 public partial class MainWindow : Window
 {
     private readonly INotificationPreferencesService _preferences;
-    private readonly IStorageService _storage;
+    private readonly string[] _districtsFromConfig;
     private readonly UiLogSink _logSink;
     private readonly ScrapeTrigger _trigger;
     private readonly ScrapeRunTracker _runTracker;
@@ -20,7 +22,7 @@ public partial class MainWindow : Window
 
     public MainWindow(
         INotificationPreferencesService preferences,
-        IStorageService storage,
+        IOptions<LlmOptions> llmOptions,
         UiLogSink logSink,
         ScrapeTrigger trigger,
         ScrapeRunTracker runTracker,
@@ -28,7 +30,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _preferences = preferences;
-        _storage = storage;
+        _districtsFromConfig = llmOptions.Value.Districts;
         _logSink = logSink;
         _trigger = trigger;
         _runTracker = runTracker;
@@ -73,9 +75,17 @@ public partial class MainWindow : Window
         _trigger.Signal();
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        await RefreshAsync();
+        try
+        {
+            RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Не удалось построить список районов");
+            StatusText.Text = "Ошибка загрузки данных";
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -85,13 +95,12 @@ public partial class MainWindow : Window
         _districts.Clear();
     }
 
-    private async Task RefreshAsync()
+    private void RefreshAsync()
     {
         var selected = new HashSet<string>(_preferences.SelectedDistricts, StringComparer.OrdinalIgnoreCase);
-        var districts = await _storage.GetDistrictsAsync(CancellationToken.None);
 
         _districts.Clear();
-        foreach (var district in districts)
+        foreach (var district in _districtsFromConfig)
             _districts.Add(new DistrictItem { Name = district, IsSelected = selected.Contains(district) });
 
         UpdateStatus();

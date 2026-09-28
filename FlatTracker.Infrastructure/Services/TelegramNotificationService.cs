@@ -23,6 +23,41 @@ public sealed class TelegramNotificationService : INotificationService
         _logger = logger;
         _botClient = new TelegramBotClient(options.Value.BotToken);
         _chatId = options.Value.ChatId;
+
+        if (string.IsNullOrWhiteSpace(options.Value.BotToken))
+            _logger.LogWarning("Telegram:BotToken не задан, уведомления работать не будут");
+
+        if (options.Value.ChatId == 0)
+            _logger.LogWarning("Telegram:ChatId не задан, уведомления работать не будут");
+    }
+
+    public async Task SendTextAsync(string text, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        if (_chatId == 0)
+        {
+            _logger.LogWarning("Пропущено уведомление: Telegram:ChatId не задан");
+            return;
+        }
+
+        try
+        {
+            await _botClient.SendMessage(
+                chatId: _chatId,
+                text: text,
+                parseMode: ParseMode.None,
+                cancellationToken: ct);
+        }
+        catch (ApiRequestException ex)
+        {
+            _logger.LogError(ex, "Ошибка отправки сообщения в Telegram: {Message}", ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Неожиданная ошибка при отправке уведомления в Telegram");
+        }
     }
 
     public async Task NotifyScrapeCompletedAsync(ScrapeReport report, CancellationToken ct = default)
@@ -74,6 +109,7 @@ public sealed class TelegramNotificationService : INotificationService
 
         var builder = new StringBuilder();
         builder.AppendLine("🏠 <b>Новые и обновлённые объявления</b>");
+        builder.AppendLine("Источник: 🟡 Куфар");
         builder.AppendLine($"Время: {report.GeneratedAt:dd.MM.yyyy HH:mm:ss}");
         builder.AppendLine();
 

@@ -9,9 +9,9 @@ using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Retry;
 
-namespace FlatTracker.UI.Services;
+namespace FlatTracker.UI.Workers;
 
-public sealed class ScraperWorker(
+public sealed class KufarScraperWorker(
     IScraperService scraperService,
     IStorageService storageService,
     INotificationService notificationService,
@@ -19,7 +19,7 @@ public sealed class ScraperWorker(
     IOptions<ScraperOptions> options,
     ScrapeTrigger trigger,
     ScrapeRunTracker runTracker,
-    ILogger<ScraperWorker> logger) : BackgroundService
+    ILogger<KufarScraperWorker> logger) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
