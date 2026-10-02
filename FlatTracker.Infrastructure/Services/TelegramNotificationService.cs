@@ -14,37 +14,54 @@ namespace FlatTracker.Infrastructure.Services;
 
 public sealed class TelegramNotificationService : INotificationService
 {
-    private readonly TelegramBotClient _botClient;
+    private readonly TelegramBotClient? _botClient;
     private readonly long _chatId;
     private readonly ILogger<TelegramNotificationService> _logger;
 
     public TelegramNotificationService(IOptions<TelegramOptions> options, ILogger<TelegramNotificationService> logger)
     {
         _logger = logger;
-        _botClient = new TelegramBotClient(options.Value.BotToken);
         _chatId = options.Value.ChatId;
 
-        if (string.IsNullOrWhiteSpace(options.Value.BotToken))
-            _logger.LogWarning("Telegram:BotToken не задан, уведомления работать не будут");
+        var token = options.Value.BotToken?.Trim();
 
-        if (options.Value.ChatId == 0)
+        if (string.IsNullOrEmpty(token) || !token.Contains(':'))
+        {
+            _logger.LogWarning(
+                "Telegram:BotToken не задан или не похож на токен бота, уведомления отключены");
+            return;
+        }
+
+        if (_chatId == 0)
             _logger.LogWarning("Telegram:ChatId не задан, уведомления работать не будут");
+
+        try
+        {
+            _botClient = new TelegramBotClient(token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Не удалось создать клиент Telegram, уведомления отключены");
+        }
     }
+
+    /// <summary>Готов ли сервис к отправке: есть клиент и чат.</summary>
+    private bool CanSend => _botClient is not null && _chatId != 0;
 
     public async Task SendTextAsync(string text, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(text))
             return;
 
-        if (_chatId == 0)
+        if (!CanSend)
         {
-            _logger.LogWarning("Пропущено уведомление: Telegram:ChatId не задан");
+            _logger.LogWarning("Пропущено уведомление: {Reason}", UnavailableReason());
             return;
         }
 
         try
         {
-            await _botClient.SendMessage(
+            await _botClient!.SendMessage(
                 chatId: _chatId,
                 text: text,
                 parseMode: ParseMode.None,
@@ -65,11 +82,17 @@ public sealed class TelegramNotificationService : INotificationService
         if (report.NewAds.Count == 0 && report.UpdatedAds.Count == 0)
             return;
 
+        if (!CanSend)
+        {
+            _logger.LogWarning("Отчёт не отправлен: {Reason}", UnavailableReason());
+            return;
+        }
+
         try
         {
             var message = BuildMessage(report);
 
-            await _botClient.SendMessage(
+            await _botClient!.SendMessage(
                 chatId: _chatId,
                 text: message,
                 parseMode: ParseMode.Html,
@@ -92,6 +115,12 @@ public sealed class TelegramNotificationService : INotificationService
 
     public async Task TestConnectionAsync()
     {
+        if (_botClient is null)
+        {
+            _logger.LogWarning("Проверка подключения пропущена: токен бота не настроен");
+            return;
+        }
+
         try
         {
             var me = await _botClient.GetMe();
@@ -102,6 +131,10 @@ public sealed class TelegramNotificationService : INotificationService
             _logger.LogError(ex, "Не удалось подключиться к Telegram API");
         }
     }
+
+    private string UnavailableReason() => _botClient is null
+        ? "Telegram:BotToken не настроен"
+        : "Telegram:ChatId не задан";
 
     private static string BuildMessage(ScrapeReport report)
     {
