@@ -83,7 +83,18 @@ public sealed class LlmParsingService : IAsyncDisposable
 
                 var request = BuildRequest(messageText);
 
+                _logger.LogInformation(
+                    "Запрос к LLM: модель {Model}, в сообщении {Chars} симв.",
+                    _options.Model, messageText.Length);
+                _logger.LogDebug("Промп: {Prompt}", request.Prompt);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 var fullResponse = await CollectStreamAsync(_ollama.GenerateAsync(request, timeout.Token), timeout.Token);
+                sw.Stop();
+
+                _logger.LogInformation(
+                    "Ответ LLM за {Ms} мс, {Chars} симв.: {Raw}",
+                    sw.ElapsedMilliseconds, fullResponse.Length, Truncate(fullResponse, 300));
 
                 if (string.IsNullOrWhiteSpace(fullResponse))
                 {
@@ -120,6 +131,7 @@ public sealed class LlmParsingService : IAsyncDisposable
             await DelayBeforeRetryAsync(attempt, ct);
         }
 
+        _logger.LogWarning("LLM не дала результата после {Attempts} попыток", maxRetries + 1);
         return null;
     }
 

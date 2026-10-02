@@ -33,7 +33,10 @@ public sealed class TelegramMonitorPipelineWorker(
             try
             {
                 if (await ProcessMessageAsync(message, stoppingToken))
-                    processed++;            }
+                {
+                    processed++;
+                }
+            }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 throw;
@@ -49,15 +52,29 @@ public sealed class TelegramMonitorPipelineWorker(
 
     private async Task<bool> ProcessMessageAsync(QueuedMessage message, CancellationToken ct)
     {
+        var preview = Preview(message.Text);
+
+        logger.LogInformation("Из очереди: {Source}, {Chars} симв. — {Preview}",
+            SourceLabel(message.Source), message.Text.Length, preview);
+
         if (!preFilter.IsLikelyAd(message.Text))
+        {
+            logger.LogDebug("Префильтр отбросил сообщение: {Preview}", preview);
             return false;
+        }
 
         if (!dedup.TryMarkAsSeen(message.Text, out var hash))
+        {
+            logger.LogDebug("Дубликат, повторно в LLM не отправляем: {Preview}", preview);
             return false;
+        }
 
         var sw = Stopwatch.StartNew();
         var parsed = await llm.ParseAdAsync(message.Text, ct);
         sw.Stop();
+
+        logger.LogInformation("LLM обработала сообщение за {Ms} мс, is_relevant={Relevant}, {Reason}",
+            sw.ElapsedMilliseconds, parsed?.IsRelevant, parsed?.Reason ?? "нет результата");
 
         if (parsed is null)
         {
@@ -87,6 +104,14 @@ public sealed class TelegramMonitorPipelineWorker(
         AdSource.TelegramGroup => "🔵 Группа",
         _ => "⚪ Источник неизвестен"
     };
+
+    /// <summary>Короткий предпросмотр текста, чтобы в логе было видно, о чём речь.</summary>
+    private static string Preview(string text)
+    {
+        var flat = text.Replace('\n', ' ').Replace('\r', ' ').Trim();
+
+        return flat.Length <= 120 ? flat : flat[..120] + "…";
+    }
 
     private static string FormatNotification(ParsedAd ad, QueuedMessage message)
     {

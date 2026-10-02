@@ -143,6 +143,7 @@ public sealed class TelegramMonitorWorker(
 
         foreach (var msg in queue)
         {
+            logger.LogInformation("Новое сообщение #{Id} (из истории): {Preview}", msg.id, Preview(msg.message!));
             await EnqueueAsync(msg, ct);
         }
     }
@@ -169,9 +170,44 @@ public sealed class TelegramMonitorWorker(
     {
         try
         {
+            var dropped = 0;
+            var otherGroup = 0;
+            var otherTopic = 0;
+            var tooShort = 0;
+            var unexpectedPeer = (string?)null;
+            var unexpectedTop = (int?)null;
+
             foreach (var msg in ExtractMessages(updates))
             {
-                await HandleMessageAsync(msg);
+                switch (await HandleMessageAsync(msg))
+                {
+                    case DropReason.None:
+                        break;
+                    case DropReason.OtherGroup:
+                        otherGroup++;
+                        dropped++;
+                        unexpectedPeer ??= DescribePeer(msg.peer_id);
+                        break;
+                    case DropReason.OtherTopic:
+                        otherTopic++;
+                        dropped++;
+                        unexpectedTop ??= (msg.reply_to as MessageReplyHeader)?.reply_to_top_id;
+                        break;
+                    default:
+                        tooShort++;
+                        dropped++;
+                        break;
+                }
+            }
+
+            if (dropped > 0)
+            {
+                logger.LogInformation(
+                    "Отброшено обновлений: {Dropped} (не целевая группа: {OtherGroup} {Peer}, "
+                    + "не топик {TopicId}: {OtherTopic} с top_id={TopId}, "
+                    + "короче {MinLength} симв.: {TooShort})",
+                    dropped, otherGroup, unexpectedPeer ?? "-", _options.TopicId, otherTopic,
+                    unexpectedTop?.ToString() ?? "-", _options.MinMessageLength, tooShort);
             }
         }
         catch (Exception ex)
@@ -237,23 +273,58 @@ public sealed class TelegramMonitorWorker(
         }
     }
 
-    private async Task HandleMessageAsync(Message msg)
+    private enum DropReason
+    {
+        None,
+        OtherGroup,
+        OtherTopic,
+        TooShort
+    }
+
+    /// <summary>
+    /// Возвращает причину, по которой сообщение не попало в очередь.
+    /// </summary>
+    private async Task<DropReason> HandleMessageAsync(Message msg)
     {
         if (!IsFromTargetGroup(msg))
-            return;
+        {
+            logger.LogDebug("Сообщение #{Id} не из целевой группы: {Peer}, ожидали {Expected}",
+                msg.id, DescribePeer(msg.peer_id), _targetPeerId);
+            return DropReason.OtherGroup;
+        }
 
         if (!IsFromTargetTopic(msg))
-            return;
+        {
+            var header = msg.reply_to as MessageReplyHeader;
+            logger.LogDebug(
+                "Сообщение #{Id} не из топика {TopicId}: reply_to_top_id={TopId}, reply_to_msg_id={RootId}",
+                msg.id, _options.TopicId, header?.reply_to_top_id, header?.reply_to_msg_id);
+            return DropReason.OtherTopic;
+        }
 
         if (string.IsNullOrWhiteSpace(msg.message) || msg.message.Length < _options.MinMessageLength)
-            return;
+        {
+            logger.LogDebug("Сообщение #{Id} длиной {Len} короче MinMessageLength, пропущено",
+                msg.id, msg.message?.Length ?? 0);
+            return DropReason.TooShort;
+        }
 
         var text = msg.message;
         logger.LogInformation("Новое сообщение #{Id}: {Preview}", msg.id, Preview(text));
 
         await stateStore.SetLastMessageIdAsync(_targetPeerId.ToString(), msg.id);
         await EnqueueAsync(msg, CancellationToken.None);
+        return DropReason.None;
     }
+
+    private static string DescribePeer(Peer? peer) => peer switch
+    {
+        PeerChannel ch => $"channel {ch.channel_id}",
+        PeerChat chat => $"chat {chat.chat_id}",
+        PeerUser user => $"user {user.user_id}",
+        null => "нет peer",
+        _ => peer.GetType().Name
+    };
 
     private async Task EnqueueAsync(Message msg, CancellationToken ct)
     {
@@ -277,11 +348,6 @@ public sealed class TelegramMonitorWorker(
         };
     }
 
-    /// <summary>
-    /// В форуме у сообщения внутри топика в <c>reply_to</c> лежит заголовок
-    /// с <c>reply_to_top_id</c> — id первого сообщения топика. У сообщений вне
-    /// топиков (и у служебных) такого заголовка нет.
-    /// </summary>
     private bool IsFromTargetTopic(Message msg)
     {
         if (_options.TopicId <= 0)
