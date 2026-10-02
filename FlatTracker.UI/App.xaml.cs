@@ -16,19 +16,20 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Serilog;
-using Serilog.Events;
 
 namespace FlatTracker.UI;
 
 public partial class App : Application
 {
     private IHost? _host;
+    private readonly UiLogSink _uiLogSink = new();
 
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        Log.Logger = BuildLoggerConfiguration().CreateLogger();
+        Log.Logger = LoggerSetup.Build(_uiLogSink);
+        Log.Information("Каталог логов: {LogDirectory}", LoggerSetup.LogDirectory);
 
         try
         {
@@ -51,20 +52,23 @@ public partial class App : Application
 
     private async Task StartHostAsync()
     {
+        var logger = Log.Logger;
+
         _host = Host.CreateDefaultBuilder()
+            .UseContentRoot(AppContext.BaseDirectory)
             .ConfigureAppConfiguration(configuration =>
             {
                 configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false);
             })
-            .UseSerilog((context, services, configuration) => BuildLoggerConfiguration(), writeToProviders: true)
+            .UseSerilog(logger, dispose: false)
             .ConfigureLogging(logging =>
             {
                 logging.ClearProviders();
-                logging.Services.AddSingleton<ILoggerProvider, UiLoggerProvider>();
+                logging.AddSerilog(logger, dispose: false);
             })
             .ConfigureServices((ctx, services) =>
             {
-                services.AddSingleton<UiLogSink>();
+                services.AddSingleton(_uiLogSink);
                 services.Configure<ScraperOptions>(
                     ctx.Configuration.GetSection(ScraperOptions.SectionName));
                 services.Configure<TelegramOptions>(
@@ -92,8 +96,6 @@ public partial class App : Application
 
                 services.AddSingleton(new MonitorStateStore(Path.Combine(outputPath, "monitor-state.json")));
 
-                // Ограниченная очередь: LLM медленнее Telegram, без backpressure
-                // сообщения копятся в памяти без предела.
                 services.AddSingleton(_ => Channel.CreateBounded<QueuedMessage>(
                     new BoundedChannelOptions(filterOptions.MaxQueueSize)
                     {
@@ -125,12 +127,10 @@ public partial class App : Application
         await _host.Services.GetRequiredService<INotificationPreferencesService>()
             .LoadAsync(CancellationToken.None);
 
-        var logger = _host.Services.GetRequiredService<ILogger<App>>();
         var opts = _host.Services.GetRequiredService<IOptions<ScraperOptions>>().Value;
-        logger.LogInformation("FlatTracker started. Target: {Url}", opts.TargetUrl);
+        logger.Information("FlatTracker started. Target: {Url}", opts.TargetUrl);
 
-        // Схему БД создаём до показа окна: MainWindow при загрузке сразу читает
-        // районы из Ads, и без таблицы падает с "no such table: Ads".
+        // Схему БД создаём до показа окна
         await _host.Services.GetRequiredService<IStorageService>()
             .EnsureInitializedAsync(CancellationToken.None);
 
@@ -170,11 +170,4 @@ public partial class App : Application
         await Log.CloseAndFlushAsync();
         base.OnExit(e);
     }
-
-    private static LoggerConfiguration BuildLoggerConfiguration() => new LoggerConfiguration()
-        .MinimumLevel.Information()
-        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-        .WriteTo.Console(
-            outputTemplate: "{Timestamp:HH:mm:ss} [{Level:u4}] {Message:lj}{NewLine}{Exception}")
-        .WriteTo.File("logs/flattracker-.log", rollingInterval: RollingInterval.Day);
 }

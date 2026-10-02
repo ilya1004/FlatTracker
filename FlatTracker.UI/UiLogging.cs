@@ -1,10 +1,16 @@
 using System.Collections.Concurrent;
-using Microsoft.Extensions.Logging;
+using Serilog.Core;
+using Serilog.Events;
 
 namespace FlatTracker.UI;
 
-public sealed class UiLogSink
+/// <summary>
+/// Приёмник логов для окна приложения
+/// </summary>
+public sealed class UiLogSink : ILogEventSink
 {
+    private static readonly string[] LogLevels = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL" };
+
     private readonly ConcurrentQueue<string> _messages = new();
     private readonly object _lock = new();
     private Action<string>? _subscribers;
@@ -16,6 +22,16 @@ public sealed class UiLogSink
     }
 
     public IEnumerable<string> GetBuffer() => _messages.ToArray();
+
+    public void Emit(LogEvent logEvent)
+    {
+        var line = $"{logEvent.Timestamp.ToLocalTime():HH:mm:ss} [{LogLevels[(int)logEvent.Level]}] {logEvent.RenderMessage()}";
+
+        if (logEvent.Exception is not null)
+            line += Environment.NewLine + logEvent.Exception;
+
+        Write(line);
+    }
 
     public void Write(string message)
     {
@@ -33,72 +49,5 @@ public sealed class UiLogSink
         }
 
         subscribers?.Invoke(message);
-    }
-}
-
-public sealed class UiLoggerProvider : ILoggerProvider
-{
-    private readonly UiLogSink _sink;
-
-    public UiLoggerProvider(UiLogSink sink)
-    {
-        _sink = sink;
-    }
-
-    public ILogger CreateLogger(string categoryName) => new UiLogger(_sink, categoryName);
-
-    public void Dispose()
-    {
-    }
-
-    private sealed class UiLogger : ILogger
-    {
-        private static readonly string[] LogLevels = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL" };
-
-        private readonly UiLogSink _sink;
-        private readonly string _categoryName;
-
-        public UiLogger(UiLogSink sink, string categoryName)
-        {
-            _sink = sink;
-            _categoryName = categoryName;
-        }
-
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-
-        public bool IsEnabled(LogLevel logLevel)
-        {
-            if (logLevel < LogLevel.Information)
-            {
-                return false;
-            }
-
-            if (logLevel <= LogLevel.Information
-                && _categoryName.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            if (!IsEnabled(logLevel))
-            {
-                return;
-            }
-
-            var level = LogLevels[(int)logLevel];
-            var line = $"{DateTime.Now:HH:mm:ss} [{level}] {formatter(state, exception)}";
-
-            if (exception is not null)
-            {
-                line += Environment.NewLine + exception;
-            }
-
-            _sink.Write(line);
-        }
     }
 }
