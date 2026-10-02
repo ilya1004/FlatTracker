@@ -25,6 +25,11 @@ public sealed class TelegramClientService : IAsyncDisposable
     private const string ConfigLangCode = "lang_code";
     private const string ConfigDatabaseDirectory = "database_directory";
     private const string ConfigDatabaseEncryptionKey = "database_encryption_key";
+    private const string ConfigLangPack = "lang_pack";
+    private const string ConfigUserId = "user_id";
+    private const string ConfigInitParams = "init_params";
+    private const string ConfigFirstName = "first_name";
+    private const string ConfigLastName = "last_name";
 
     private readonly Client _client;
     private readonly string _sessionFilePath;
@@ -58,12 +63,6 @@ public sealed class TelegramClientService : IAsyncDisposable
     /// WTelegram запрашивает значения синхронно, а набор ключей меняется между версиями,
     /// поэтому неизвестные ключи отдаём null, а не бросаем исключение.
     /// </summary>
-    /// <remarks>
-    /// Ключи, к которым чувствителен разбор, возвращать как пустую строку нельзя:
-    /// <c>session_key</c> — это hex-строка, и <c>Convert.FromHexString("")</c> даёт
-    /// пустой массив, из-за чего AES падает с «Specified key is not a valid size».
-    /// null заставляет WTelegram использовать <c>api_hash</c> (32 hex = 16 байт) — это штатный режим.
-    /// </remarks>
     private Func<string, string?> BuildConfig(TelegramOptions opt) => what => what switch
     {
         ConfigApiId => opt.ApiId.ToString(),
@@ -83,6 +82,13 @@ public sealed class TelegramClientService : IAsyncDisposable
         ConfigLangCode => "ru",
         ConfigDatabaseDirectory => null,
         ConfigDatabaseEncryptionKey => null,
+        // Заведомо необязательные ключи: пустое значение — корректный ответ,
+        // предупреждать о них не нужно.
+        ConfigLangPack => null,
+        ConfigUserId => null,
+        ConfigInitParams => null,
+        ConfigFirstName => null,
+        ConfigLastName => null,
         _ => HandleUnknownKey(what)
     };
 
@@ -139,8 +145,7 @@ public sealed class TelegramClientService : IAsyncDisposable
 
     /// <summary>
     /// WTelegram вызывает конфигурацию синхронно из фонового потока, поэтому
-    /// ввод возможен только через диспетчер WPF. Требует запущенного message loop,
-    /// т.е. MainWindow должен быть показан до старта хоста.
+    /// ввод возможен только через диспетчер WPF.
     /// </summary>
     private string PromptForValue(string prompt, bool isSecret)
     {
