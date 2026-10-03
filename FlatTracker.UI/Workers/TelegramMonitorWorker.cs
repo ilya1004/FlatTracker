@@ -21,6 +21,8 @@ public sealed class TelegramMonitorWorker(
     private readonly TelegramOptions _options = options.Value;
     private InputPeer? _targetPeer;
     private long _targetPeerId;
+    private int _topicRootMessageId;
+    private string? _topicTitle;
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -69,10 +71,10 @@ public sealed class TelegramMonitorWorker(
 
         if (_options.TopicId > 0)
         {
-            var topicTitle = await TryResolveTopicTitleAsync(client);
+            await ResolveTopicAsync(client);
             logger.LogInformation(
-                "Целевой топик форума: id {TopicId}{Title}", _options.TopicId,
-                topicTitle is null ? string.Empty : $" ({topicTitle})");
+                "Целевой топик форума: {Topic}, корневое сообщение {RootId}",
+                TopicLabel, _topicRootMessageId);
         }
 
         var peerKey = _targetPeerId.ToString();
@@ -174,47 +176,77 @@ public sealed class TelegramMonitorWorker(
             var otherGroup = 0;
             var otherTopic = 0;
             var tooShort = 0;
-            var unexpectedPeer = (string?)null;
-            var unexpectedTop = (int?)null;
+            string? samplePeer = null;
+            int? sampleRootId = null;
+            int? sampleTopId = null;
 
             foreach (var msg in ExtractMessages(updates))
             {
+                var header = msg.reply_to as MessageReplyHeader;
+
                 switch (await HandleMessageAsync(msg))
                 {
                     case DropReason.None:
                         break;
+
                     case DropReason.OtherGroup:
                         otherGroup++;
                         dropped++;
-                        unexpectedPeer ??= DescribePeer(msg.peer_id);
+                        samplePeer ??= DescribePeer(msg.peer_id);
                         break;
+
                     case DropReason.OtherTopic:
                         otherTopic++;
                         dropped++;
-                        unexpectedTop ??= (msg.reply_to as MessageReplyHeader)?.reply_to_top_id;
+                        sampleRootId ??= header?.reply_to_msg_id;
+                        sampleTopId ??= header?.reply_to_top_id;
                         break;
-                    default:
+
+                    case DropReason.TooShort:
                         tooShort++;
                         dropped++;
                         break;
                 }
             }
 
-            if (dropped > 0)
+            if (dropped == 0)
+                return;
+
+            // Собираем только те причины, которые реально сработали: перечислять
+            // нули оказалось неудобно — их принимали за длину сообщений.
+            var reasons = new List<string>(3);
+
+            if (otherGroup > 0)
             {
-                logger.LogInformation(
-                    "Отброшено обновлений: {Dropped} (не целевая группа: {OtherGroup} {Peer}, "
-                    + "не топик {TopicId}: {OtherTopic} с top_id={TopId}, "
-                    + "короче {MinLength} симв.: {TooShort})",
-                    dropped, otherGroup, unexpectedPeer ?? "-", _options.TopicId, otherTopic,
-                    unexpectedTop?.ToString() ?? "-", _options.MinMessageLength, tooShort);
+                reasons.Add(
+                    $"не из {_options.Group} — {otherGroup} (peer: {samplePeer ?? "неизвестен"})");
             }
+
+            if (otherTopic > 0)
+            {
+                reasons.Add(
+                    $"не из топика {TopicLabel} — {otherTopic} "
+                    + $"(reply_to_msg_id={Format(sampleRootId)}, reply_to_top_id={Format(sampleTopId)})");
+            }
+
+            if (tooShort > 0)
+                reasons.Add($"короче {_options.MinMessageLength} симв. — {tooShort}");
+
+            logger.LogInformation(
+                "Отфильтровано обновлений: {Dropped} — {Reasons}", dropped, string.Join(" | ", reasons));
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Ошибка обработки батча обновлений");
         }
     }
+
+    private string TopicLabel => _options.TopicId <= 0
+        ? "не задан"
+        : _topicTitle is null ? $"#{_options.TopicId}" : $"«{_topicTitle}» (#{_options.TopicId})";
+
+    private static string Format(int? value) =>
+        value is null or 0 ? "нет" : value.Value.ToString();
 
     /// <summary>
     /// Разбирает UpdatesBase любого типа и возвращает все новые сообщения.
@@ -297,8 +329,10 @@ public sealed class TelegramMonitorWorker(
         {
             var header = msg.reply_to as MessageReplyHeader;
             logger.LogDebug(
-                "Сообщение #{Id} не из топика {TopicId}: reply_to_top_id={TopId}, reply_to_msg_id={RootId}",
-                msg.id, _options.TopicId, header?.reply_to_top_id, header?.reply_to_msg_id);
+                "Сообщение #{Id} не из топика {TopicId} (корень {RootId}): "
+                + "reply_to_msg_id={RootId2}, reply_to_top_id={TopId}",
+                msg.id, _options.TopicId, _topicRootMessageId, header?.reply_to_msg_id,
+                header?.reply_to_top_id);
             return DropReason.OtherTopic;
         }
 
@@ -348,15 +382,27 @@ public sealed class TelegramMonitorWorker(
         };
     }
 
+    /// <summary>
+    /// Сообщение внутри топика форума отвечает на корневое служебное сообщение
+    /// топика, поэтому надёжный признак — <c>reply_to_msg_id == ForumTopic.top_message</c>.
+    /// <c>reply_to_top_id</c> для обычных сообщений топика не заполняется (приходит 0)
+    /// и годится только для ответов между разными топиками.
+    /// </summary>
     private bool IsFromTargetTopic(Message msg)
     {
         if (_options.TopicId <= 0)
             return true;
 
-        return msg.reply_to is MessageReplyHeader header && header.reply_to_top_id == _options.TopicId;
+        if (msg.reply_to is not MessageReplyHeader header)
+            return false;
+
+        if (_topicRootMessageId > 0 && header.reply_to_msg_id == _topicRootMessageId)
+            return true;
+
+        return header.reply_to_top_id == _options.TopicId;
     }
 
-    private async Task<string?> TryResolveTopicTitleAsync(Client client)
+    private async Task ResolveTopicAsync(Client client)
     {
         try
         {
@@ -366,12 +412,29 @@ public sealed class TelegramMonitorWorker(
                 .OfType<ForumTopic>()
                 .FirstOrDefault(t => t.id == _options.TopicId);
 
-            return match?.title;
+            if (match is null)
+            {
+                logger.LogWarning(
+                    "Топик {TopicId} не найден среди топиков форума — фильтр по топику отключён",
+                    _options.TopicId);
+                return;
+            }
+
+            // id корневого служебного сообщения топика: на него отвечает каждое
+            // сообщение внутри топика, поэтому это надёжнее, чем reply_to_top_id.
+            _topicRootMessageId = match.top_message;
+            _topicTitle = match.title;
+
+            if (_topicRootMessageId == 0)
+            {
+                logger.LogWarning(
+                    "У топика {TopicId} нет корневого сообщения — сопоставление по корню недоступно",
+                    _options.TopicId);
+            }
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Не удалось получить список топиков форума");
-            return null;
         }
     }
 
