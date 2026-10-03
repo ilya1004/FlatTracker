@@ -131,17 +131,8 @@ public sealed class TelegramClientService : IAsyncDisposable
         return null;
     }
 
-    private static string ResolveSessionPath(string configured)
-    {
-        var fileName = string.IsNullOrWhiteSpace(configured) ? "telegram.session" : configured;
-        var full = Path.GetFullPath(fileName);
-        var dir = Path.GetDirectoryName(full);
-
-        if (!string.IsNullOrEmpty(dir))
-            Directory.CreateDirectory(dir);
-
-        return full;
-    }
+    private static string ResolveSessionPath(string configured) =>
+        AppDataPaths.ResolveFile(configured, "telegram.session");
 
     /// <summary>
     /// WTelegram вызывает конфигурацию синхронно из фонового потока, поэтому

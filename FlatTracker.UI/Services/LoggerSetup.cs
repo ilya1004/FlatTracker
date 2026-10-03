@@ -53,18 +53,17 @@ internal static class LoggerSetup
 
         if (!string.IsNullOrWhiteSpace(configured))
         {
-            var full = Path.IsPathRooted(configured)
-                ? configured
-                : Path.Combine(AppContext.BaseDirectory, configured);
+            var candidate = Path.IsPathRooted(configured)
+                ? Path.GetFullPath(configured)
+                : Path.GetFullPath(Path.Combine(AppDataPaths.Root, configured.TrimStart('.', '/', '\\')));
 
-            if (TryEnsureDirectory(full))
-                return full;
+            if (TryEnsureDirectory(candidate))
+                return candidate;
         }
 
-        var fallback = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FlatTracker",
-            "logs");
+        // Каталог данных может оказаться недоступен для записи — тогда логируем
+        // во временный каталог, чтобы старт не падал из-за файлового sink.
+        var fallback = Path.Combine(AppDataPaths.Root, "logs");
 
         return TryEnsureDirectory(fallback) ? fallback : Path.GetTempPath();
     }

@@ -30,6 +30,7 @@ public partial class App : Application
 
         Log.Logger = LoggerSetup.Build(_uiLogSink);
         Log.Information("Каталог логов: {LogDirectory}", LoggerSetup.LogDirectory);
+        Log.Information("Каталог данных: {DataRoot}", AppDataPaths.Root);
 
         try
         {
@@ -83,8 +84,7 @@ public partial class App : Application
 
                 var outputDir = ctx.Configuration
                     .GetSection(ScraperOptions.SectionName)["OutputDirectory"];
-                var outputPath = Path.GetFullPath(outputDir ?? "./output");
-                Directory.CreateDirectory(outputPath);
+                var outputPath = AppDataPaths.ResolveOutputPath(outputDir);
                 var dbPath = Path.Combine(outputPath, "flats.db");
 
                 services.AddDbContextFactory<AppDbContext>(o =>
